@@ -3,11 +3,105 @@ use warnings;
 
 package fronthem;
 
+
+###############################################################################
+#
+# Read and write fhem device Attributes (gadval == attribute == setval)
+#
+###############################################################################
+
+sub Attribute(@)
+{
+  my ($param) = @_;
+  my $cmd = $param->{cmd};
+  my $gad = $param->{gad};
+  my $gadval = $param->{gadval};
+
+  my $device = $param->{device};
+  my $attribute = $param->{reading};
+  my $event = $param->{event};
+  
+  my @args = @{$param->{args}};
+  my $cache = $param->{cache};
+  
+  my $result = '';
+
+  if ($param->{cmd} eq 'get')
+  {
+    $event = main::AttrVal($device, $attribute, '');
+    $param->{cmd} = 'send';
+  }
+  if ($param->{cmd} eq 'send')
+  {
+    $param->{gad} = $gad;
+		$param->{gadval} = $event;
+		$param->{gads} = [];
+    return undef;
+  }
+  elsif ($param->{cmd} eq 'rcv')
+  {
+		$result = main::Log(1, 'attr '.$device.' '.$attribute.' '.$gadval);
+		$result = main::fhem('attr '.$device.' '.$attribute.' '.$gadval);
+    return 'done';
+  }
+  elsif ($param->{cmd} eq '?')
+  {
+    return 'usage: Direct';
+  }
+  return undef;
+}
+
+###############################################################################
+#
+# Read fhem device Reading timestamps (gadval == timestamp)
+#
+###############################################################################
+
+sub ReadingsTimestamp(@)
+{
+  my ($param) = @_;
+  my $cmd = $param->{cmd};
+  my $gad = $param->{gad};
+  my $gadval = $param->{gadval};
+
+  my $device = $param->{device};
+  my $reading = $param->{reading};
+  my $event = $param->{event};
+  
+  my @args = @{$param->{args}};
+  my $cache = $param->{cache};
+
+  if ($param->{cmd} eq 'get')
+  {
+    $event = main::ReadingsTimestamp($device, $reading, '');
+    $param->{cmd} = 'send';
+  }
+  if ($param->{cmd} eq 'send')
+  {
+    $param->{gad} = $gad;
+		$param->{gadval} = $event;
+		$param->{gads} = [];
+    return undef;
+  }
+  elsif ($param->{cmd} eq 'rcv')
+  {
+    return 'done';
+  }
+  elsif ($param->{cmd} eq '?')
+  {
+    return 'usage: Readingstimestamp';
+  }
+  return undef;
+}
+
+#------------------------------------------------------------------------------
+
 ###############################################################################
 #
 # direkt relations (gadval == reading == setval)
 #
 ###############################################################################
+
 sub Direct(@)
 {
   my ($param) = @_;
