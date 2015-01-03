@@ -73,14 +73,13 @@ sub ReadingsTimestamp(@)
 
   if ($param->{cmd} eq 'get')
   {
-    $event = main::ReadingsTimestamp($device, $reading, '');
     $param->{cmd} = 'send';
   }
   if ($param->{cmd} eq 'send')
   {
     $param->{gad} = $gad;
-		$param->{gadval} = $event;
-		$param->{gads} = [];
+    $param->{gadval} = main::ReadingsTimestamp($device, $reading, 0);
+    $param->{gads} = [];
     return undef;
   }
   elsif ($param->{cmd} eq 'rcv')
@@ -118,13 +117,12 @@ sub Direct(@)
 
   if ($param->{cmd} eq 'get')
   {
-    $event = ($reading eq 'state')?main::Value($device):main::ReadingsVal($device, $reading, '');
     $param->{cmd} = 'send';
   }
   if ($param->{cmd} eq 'send')
   {
     $param->{gad} = $gad;
-		$param->{gadval} = $event;
+		$param->{gadval} = ($reading eq 'state')?main::Value($device):main::ReadingsVal($device, $reading, '');
 		$param->{gads} = [];
     return undef;
   }
