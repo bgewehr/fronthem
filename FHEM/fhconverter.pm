@@ -3,6 +3,50 @@ use warnings;
 
 package fronthem;
 
+###############################################################################
+#
+# Read status and trigger a fhem notify (gadval == notify => trigger)
+#
+###############################################################################
+
+sub Trigger(@)
+{
+  my ($param) = @_;
+  my $cmd = $param->{cmd};
+  my $gad = $param->{gad};
+  my $gadval = $param->{gadval};
+
+  my $device = $param->{device};
+  my $attribute = $param->{reading};
+  my $event = $param->{event};
+  
+  my @args = @{$param->{args}};
+  my $cache = $param->{cache};
+  
+  my $result = '';
+
+  if ($param->{cmd} eq 'get')
+  {
+    $param->{cmd} = 'send';
+  }
+  if ($param->{cmd} eq 'send')
+  {
+    $param->{gad} = $gad;
+	$param->{gadval} = main::ReadingsVal($device, $attribute, '');;
+	$param->{gads} = [];
+    return undef;
+  }
+  elsif ($param->{cmd} eq 'rcv')
+  {
+	$result = main::fhem('trigger '.$device);
+    return 'done';
+  }
+  elsif ($param->{cmd} eq '?')
+  {
+    return 'usage: Direct';
+  }
+  return undef;
+}
 
 ###############################################################################
 #
@@ -28,19 +72,17 @@ sub Attribute(@)
 
   if ($param->{cmd} eq 'get')
   {
-    $event = main::AttrVal($device, $attribute, '');
     $param->{cmd} = 'send';
   }
   if ($param->{cmd} eq 'send')
   {
     $param->{gad} = $gad;
-		$param->{gadval} = $event;
+		$param->{gadval} = main::AttrVal($device, $attribute, '');
 		$param->{gads} = [];
     return undef;
   }
   elsif ($param->{cmd} eq 'rcv')
   {
-		$result = main::Log(1, 'attr '.$device.' '.$attribute.' '.$gadval);
 		$result = main::fhem('attr '.$device.' '.$attribute.' '.$gadval);
     return 'done';
   }
