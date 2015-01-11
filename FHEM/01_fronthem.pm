@@ -5,16 +5,6 @@
 #organize loading order
 #attr cfg file
 
-# fixed:
-# issue with some JSON module at startup
-# perl before 5.14 issue 
-# remove debug output
-
-# open:
-# UTF8 conversation 
-# timestrings
-# num converter with negative values
-# 99er converter (see reload)
 
 package main;
 
@@ -41,7 +31,6 @@ fronthem_Initialize(@)
   $hash->{DefFn}      = "fronthem_Define";
   $hash->{SetFn}      = "fronthem_Set";
   $hash->{ReadFn}     = "fronthem_Read";
-  $hash->{UndefFn}    = "fronthem_Undef";
   $hash->{ShutdownFn} = "fronthem_Shutdown";
   $hash->{AttrList}   = "configFile ".$readingFnAttributes;
 }
@@ -78,19 +67,14 @@ fronthem_Define($$)
   $hash->{FD} = $hash->{helper}->{listener}->fileno();
   $selectlist{"$name:ipcListener"} = $hash;
 
-  $hash->{helper}->{main}->{state} = 'run';
-  if ($init_done)
-  {
-    # TODO set initial readings
-  }
-
   # prepare forking the ws server
+  # workaround, forking from define via webif will lock the webif for unknown reason
   $cfg->{hash} = $hash;
   $cfg->{id} = 'ws';
-  $cfg->{port} = 2121;
   $cfg->{ipcPort} = $port;
-  fronthem_StartWebsocketServer($cfg);
-
+  #TODO: move to initialized
+  InternalTimer(gettimeofday()+1, "fronthem_StartWebsocketServer", $cfg, 1);
+  #fronthem_StartWebsocketServer($cfg);
   return undef;
 }
 
@@ -116,7 +100,7 @@ fronthem_Read(@)
   my $flags = fcntl($ipcClient, F_GETFL, 0) or return "error shaping ipc client: $!";
   fcntl($ipcClient, F_SETFL, $flags | O_NONBLOCK) or return "error shaping ipc client: $!";
 
-  # TODO connections from other then localhost possible||usefull ? evaluate the need ...
+  #TODO connections from other then localhost possible||usefull ? evaluate the need ...
   
   my $ipcHash;
   $ipcHash->{TCPDev} = $ipcClient;
@@ -130,58 +114,9 @@ fronthem_Read(@)
   $ipcHash->{buffer} = '';
   $selectlist{$name} = $ipcHash;
 
-  # $hash->{helper}->{ipc}->{$name} = $ipcClient;
-  # TODO log connection
-  return undef;
-}
+  $hash->{helper}->{ipc}->{$name} = $ipcClient;
 
-sub 
-fronthem_Notify($$)
-{
-  my ($hash, $ntfyDev) = @_;
-  my $ntfyDevName = $ntfyDev->{NAME};
-
-  # responde to fhem system events
-  # INITIALIZED|REREADCFG|DEFINED|RENAMED|SHUTDOWN
-  if ($ntfyDevName eq "global")
-  {
-    foreach my $event (@{$ntfyDev->{CHANGED}})
-    {
-      my @e = split(' ', $event);
-      Log3 ($hash, 1, "in $e[0]"); #TODO remove
-      if ($e[0] eq 'INITIALIZED')
-      {
-        #
-      }
-      elsif ($e[0] eq 'RENAMED')
-      {
-        # is it a child device ?
-        # if ($gateway && ($gateway->{NAME} eq $e[1]))
-        # {
-        #  Log3 ($hash, 4, "$hash->{NAME}:gatway $e[1] renamed to $e[2] - update settings");
-        # }
-      }
-    }
-  }
-  return undef;
-}
-
-sub
-fronthem_Undef(@)
-{
-  my ($hash) = @_;
-  Log3 ($hash, 4, "$hash->{NAME}: undef called");
-  $hash->{helper}->{main}->{state} = 'undef';
-  $hash->{helper}->{ipc}->{'ws'}->{sock}->{TCPDev}->close();
-  return undef;
-}
-
-sub
-fronthem_Shutdown(@)
-{
-  my ($hash) = @_;
-  Log3 ($hash, 4, "$hash->{NAME}: shutdown called");
-  $hash->{helper}->{main}->{state} = 'shutdown';
+  #TODO log connection
   return undef;
 }
 
@@ -194,32 +129,12 @@ fronthem_ipcRead($)
   my ($up, $rv);
   my ($id,$pid) = ('?','?');
 
-  my $knownThreadId = (defined($ipcHash->{registered}))?$ipcHash->{registered}:'?';
-
   $rv = $ipcHash->{TCPDev}->recv($msg, POSIX::BUFSIZ, 0);
   unless (defined($rv) && length $msg) {
-    # child is termitating ...
-    # clean exit
-    return undef if ($ipcHash->{PARENT}->{helper}->{main}->{state} ne 'run');
-    Log3 ($ipcHash->{PARENT}, 1, "$ipcHash->{PARENT}->{NAME}: thread $knownThreadId closed for unknown reason");
+    # child is termitating ... 
+    #TODO bookkeeping,cleanup 
     delete $selectlist{$ipcHash->{NAME}};
     $ipcHash->{TCPDev}->close();
-    delete $ipcHash->{PARENT}->{helper}->{ipc}->{$ipcHash->{NAME}};
-    # TODO set state
-    # see who is using it and unregister
-    # TODO add (wss, plot) if available
-    if ($knownThreadId eq 'ws')
-    {
-      foreach my $key (keys %{$ipcHash->{PARENT}->{helper}->{sender}})
-      {
-        if ($ipcHash->{PARENT}->{helper}->{sender}->{$key}->{connection} eq $knownThreadId)
-        {
-          # disconnect fronthemClient
-          # TODO 
-        }
-      }
-    }
-    # TODO restart
     return undef;
   }
 
@@ -227,12 +142,12 @@ fronthem_ipcRead($)
 
   while (($ipcHash->{buffer} =~ m/\n/) && (($msg, $ipcHash->{buffer}) = split /\n/, $ipcHash->{buffer}, 2))
   {
-    Log3 ($ipcHash->{PARENT}, 5, "ipc $ipcHash->{NAME} ($knownThreadId): receive $msg");
+    Log3 ($ipcHash->{PARENT}, 5, "ipc $ipcHash->{NAME} ($id): receive $msg");
 
     if (defined($ipcHash->{registered}))
     {
       $id = $ipcHash->{registered}; 
-      # TODO check if a dispatcher is set
+      #TODO check if a dispatcher is set
       eval 
       {
         $up = decode_json($msg);
@@ -281,13 +196,21 @@ fronthem_ipcRead($)
   return undef;
 }
 
-# TODO remove, not used anymore
-# id: ..name of process (ie ws), $msg: what to tell
+#id: ..name of process (ie ws), $msg: what to tell
 sub 
 fronthem_ipcWrite(@)
 {
   my ($hash,$id,$msg) = @_;
   my $result = $hash->{helper}->{ipc}->{$id}->{sock}->send(encode_json($msg)."\n", 0);  
+  return undef;
+}
+
+sub
+fronthem_Shutdown(@)
+{
+  my ($hash) = @_;
+  #TODO tell all process we are going down
+
   return undef;
 }
 
@@ -317,31 +240,25 @@ fronthem_ReadCfg(@)
   };
 
   my $data;
-  my $filtered->{config} = {};
-  
-  if (length($json_text))
+  eval 
   {
-    eval 
-    {
-      my $json = JSON->new->utf8;
-      $data = $json->decode($json_text);
-    };
-    if ($@)
-    {
-      Log3 ($hash, 1, "$hash->{NAME}: Error loading cfg file $@");
-      $data->{config} = {};
-    }
+    my $json = JSON->new->utf8;
+    $data = $json->decode($json_text);
+    1;
+  } or do {
+    Log3 ($hash, 1, "$hash->{NAME}: Error loading cfg file $@");
+    $data->{config} = {};
+  };
 
-    #TODO keep filter logic up-to-date
-
-    foreach my $key (keys %{$data->{config}})
-    {
-      $filtered->{config}->{$key}->{type} = $data->{config}->{$key}->{type};
-      $filtered->{config}->{$key}->{device} = $data->{config}->{$key}->{device};
-      $filtered->{config}->{$key}->{reading} = $data->{config}->{$key}->{reading};
-      $filtered->{config}->{$key}->{converter} = $data->{config}->{$key}->{converter};
-      $filtered->{config}->{$key}->{set} = $data->{config}->{$key}->{set};
-    }
+  #TODO, check and remove if not further need: temp filter
+  my $filtered;
+  foreach my $key (keys $data->{config})
+  {
+    $filtered->{config}->{$key}->{type} = $data->{config}->{$key}->{type};
+    $filtered->{config}->{$key}->{device} = $data->{config}->{$key}->{device};
+    $filtered->{config}->{$key}->{reading} = $data->{config}->{$key}->{reading};
+    $filtered->{config}->{$key}->{converter} = $data->{config}->{$key}->{converter};
+    $filtered->{config}->{$key}->{set} = $data->{config}->{$key}->{set};
   }
 
   $hash->{helper}->{config} = $filtered->{config};
@@ -422,7 +339,7 @@ fronthem_ProcessDeviceMsg(@)
   
   #TODO: 
   # check if device with given identity is already connected
-  # if so, reject the connection and give it a hint why
+  # if so, reject the connection and ideally gibt it a hint why
 
   #check if conn is actual know
   if (!defined $hash->{helper}->{receiver}->{$connection})
@@ -455,12 +372,7 @@ fronthem_ProcessDeviceMsg(@)
       }
     }
     # sender could not be confirmed, put it on-hold because it may be defined later
-    if ($hash->{helper}->{receiver}->{$connection}->{state} eq 'connecting')
-    {
-      $hash->{helper}->{receiver}->{$connection}->{state} = 'rejected';
-      readingsSingleUpdate($hash, 'lastError', "client $access rejected", 1);
-      Log3 ($ipcHash->{PARENT}, 2, "$ipcHash->{PARENT}->{NAME} $ipcHash->{NAME} ($ipcHash->{registered}): client $access rejected");
-    }
+    $hash->{helper}->{receiver}->{$connection}->{state} = 'rejected' if $hash->{helper}->{receiver}->{$connection}->{state} eq 'connecting';
   }
   elsif(($message->{cmd} || '') eq 'handshake')
   {
@@ -517,11 +429,6 @@ fronthem_ProcessDeviceMsg(@)
 sub
 fronthem_FromDevice(@)
 {
-  # TODO
-  # only write if ipc instance is available
-  # (if not: lg warning, disconnect device)
-  # write at ipc write
-
   my ($hash, $device, $msg) = @_;
   #connection as ipc instance
   my $connection = $hash->{helper}->{sender}->{$device}->{connection};
@@ -538,56 +445,39 @@ fronthem_FromDevice(@)
 sub
 fronthem_StartWebsocketServer(@)
 {
-  my ($cfg) = @_;  
+  my ($cfg) = @_;
+  
   my $id = $cfg->{id};
 
-  my $pid = fork();
-  return "Error while try to fork $id: $!" unless (defined $pid);
+  my $ws = Net::WebSocket::Server->new(
+    listen => 2121,
+    on_connect => \&fronthem_wsConnect
+  );
 
+  #TODO error checking
+  my $pid = fork();
   if ($pid)
   {
     # prepare parent for incoming connection
     $cfg->{hash}->{helper}->{ipc}->{$id}->{pid} = $pid;
     return undef;
   }
-
-  # child ahead
+  #connect to main process
+  #TODO redirect to nul or file
+  #close STDOUT;  open STDOUT, '>/dev/null'
+  #close STDIN;
+  #close STDERR;  open STDOUT, '>/dev/null'
   setsid();
-
-  # close open handles
-  close STDOUT;  
-  open STDOUT, '>/dev/null';
-  close STDIN;
-  close STDERR;  
-  open STDOUT, '>/dev/null';
-
-  foreach my $key (keys %defs) { TcpServer_Close($defs{$key}) if ($defs{$key}->{SERVERSOCKET}); }
-  foreach my $key (keys %selectlist) { POSIX::close ($selectlist{$key}->{FD}) if (defined($selectlist{$key}->{FD})); }
-
-  # connect to main process
   my $ipc = new IO::Socket::INET (
     PeerHost => 'localhost',
     PeerPort => $cfg->{ipcPort},
-    Proto => 'tcp'
+    Proto => 'tcp',
   );
   #announce my name
-  Log3 ($cfg->{hash}->{NAME}, 3, "IN CHILD start forked $id: $id:$$");
+  Log3 ($cfg->{hash}->{NAME}, 3, "start forked $id: $id:$$");
   $ipc->send("$id:$$\n", 0);
   fronthem_forkLog3($ipc, 3, "$id alive with pid $$");
 
-  my $server = new IO::Socket::INET (
-    Listen => SOMAXCONN,
-    LocalPort => $cfg->{port},
-    Proto => 'tcp',
-    Reuse => 1
-  );
-  # my $flags = fcntl($server, F_GETFL, 0);
-  # fcntl($server, F_SETFL, $flags | O_NONBLOCK);
-
-  my $ws = Net::WebSocket::Server->new(
-    listen => $server,
-    on_connect => \&fronthem_wsConnect
-  );
   $ws->{'ipc'} = $ipc;
   $ws->{id} = $id;
   $ws->{buffer} = '';
@@ -612,10 +502,6 @@ sub
 fronthem_wsConnect(@)
 {
   my ($serv, $conn) = @_;
-
-  my $flags = fcntl($conn->socket(), F_GETFL, 0);
-  fcntl($conn->socket(), F_SETFL, $flags | O_NONBLOCK);
-
   $conn->on(
     handshake => \&fronthem_wsHandshake,
     utf8 => \&fronthem_wsUtf8,
@@ -671,8 +557,7 @@ fronthem_wsDisconnect(@)
   return undef;
 }
 
-
-# main interface for all msg from main thread (here designated to ws)
+#msg from parent (ipc)
 sub
 fronthem_wsIpcRead(@)
 {
@@ -682,6 +567,7 @@ fronthem_wsIpcRead(@)
   
   $rv = $serv->{'ipc'}->recv($msg, POSIX::BUFSIZ, 0);
   unless (defined($rv) && length $msg) {
+    #TODO bookkeeping,cleanup 
     $serv -> shutdown();
     return undef;
   }
@@ -702,19 +588,10 @@ sub
 fronthem_wsProcessInboundCmd(@)
 {
   my ($serv, $msg) = @_;
-  fronthem_forkLog3 ($serv->{ipc}, 4, "$serv->{id} send to client".encode_json($msg->{message}));
+  fronthem_forkLog3($serv->{ipc}, 4, "$serv->{id} send to client".encode_json($msg->{message}));
   foreach my $conn ($serv->connections())
   {
-    if ($conn->{id} eq $msg->{ressource})
-    {
-      return fronthem_forkLog3 ($serv->{ipc}, 1, "$serv->{id} found a closed socket for $msg->{receiver}") unless $conn->socket();
-      unless (IO::Select->new($conn->socket())->can_write(0))
-      {
-        $conn->disconnect(1011, '');
-        return fronthem_forkLog3 ($serv->{ipc}, 3, "$serv->{id} force disconnect for $msg->{receiver}");
-      } 
-      $conn->send_utf8(encode_json($msg->{message})) if ($conn->{id} eq $msg->{ressource});
-    }
+    $conn->send_utf8(encode_json($msg->{message})) if ($conn->{id} eq $msg->{ressource});
   }
   return undef;
 }

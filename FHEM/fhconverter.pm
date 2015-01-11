@@ -3,9 +3,55 @@ use warnings;
 
 package fronthem;
 
+
 ###############################################################################
 #
-# Read status and trigger a fhem notify (gadval == notify => trigger)
+# Setreading a device reading (gadval == set reading == setval)
+#
+###############################################################################
+
+sub SetReading(@)
+{
+  my ($param) = @_;
+  my $cmd = $param->{cmd};
+  my $gad = $param->{gad};
+  my $gadval = $param->{gadval};
+
+  my $device = $param->{device};
+  my $reading = $param->{reading};
+  my $event = $param->{event};
+  
+  my @args = @{$param->{args}};
+  my $cache = $param->{cache};
+
+  if ($param->{cmd} eq 'get')
+  {
+    $param->{cmd} = 'send';
+  }
+  if ($param->{cmd} eq 'send')
+  {
+    $param->{gad} = $gad;
+	$param->{gadval} = main::ReadingsVal($device, $reading, '');
+	$param->{gads} = [];
+    return undef;
+  }
+  elsif ($param->{cmd} eq 'rcv')
+  {
+	$param->{result} = main::fhem("setreading $device $reading '$gadval'");
+	$param->{results} = [];
+    return 'done';
+  }
+  elsif ($param->{cmd} eq '?')
+  {
+    return 'usage: SetReading';
+  }
+  return undef;
+}
+
+
+###############################################################################
+#
+# Read status and trigger a fhem notify (gadval => trigger => notify)
 #
 ###############################################################################
 
@@ -38,7 +84,7 @@ sub Trigger(@)
   }
   elsif ($param->{cmd} eq 'rcv')
   {
-	$result = main::fhem('trigger '.$device);
+	$result = main::fhem("trigger $device");
     return 'done';
   }
   elsif ($param->{cmd} eq '?')
@@ -77,13 +123,13 @@ sub Attribute(@)
   if ($param->{cmd} eq 'send')
   {
     $param->{gad} = $gad;
-		$param->{gadval} = main::AttrVal($device, $attribute, '');
-		$param->{gads} = [];
+	$param->{gadval} = main::AttrVal($device, $attribute, '');
+	$param->{gads} = [];	
     return undef;
   }
   elsif ($param->{cmd} eq 'rcv')
   {
-		$result = main::fhem('attr '.$device.' '.$attribute.' '.$gadval);
+	$result = main::fhem("attr $device $attribute $gadval");
     return 'done';
   }
   elsif ($param->{cmd} eq '?')
@@ -139,7 +185,7 @@ sub ReadingsTimestamp(@)
 
 ###############################################################################
 #
-# direkt relations (gadval == reading == setval)
+# direct relations (gadval == reading == setval)
 #
 ###############################################################################
 
@@ -164,14 +210,14 @@ sub Direct(@)
   if ($param->{cmd} eq 'send')
   {
     $param->{gad} = $gad;
-		$param->{gadval} = ($reading eq 'state')?main::Value($device):main::ReadingsVal($device, $reading, '');
-		$param->{gads} = [];
+	$param->{gadval} = ($reading eq 'state')?main::Value($device):main::ReadingsVal($device, $reading, '');
+	$param->{gads} = [];
     return undef;
   }
   elsif ($param->{cmd} eq 'rcv')
   {
-		$param->{result} = $gadval;
-		$param->{results} = [];
+	$param->{result} = $gadval;
+	$param->{results} = [];
     return undef;
   }
   elsif ($param->{cmd} eq '?')

@@ -23,7 +23,6 @@ fronthemDevice_Initialize(@)
   $hash->{SetFn}        = "fronthemDevice_Set";
   $hash->{GetFn}        = "fronthemDevice_Get";
   $hash->{NotifyFn}     = "fronthemDevice_Notify";
-  $hash->{UndefFn}      = "fronthemDevice_Undef";
   $hash->{ShutdownFn}   = "fronthemDevice_Shutdown";
   $hash->{FW_detailFn}  = "fronthemDevice_fwDetail";
   $hash->{AttrList}     = "configFile ".$readingFnAttributes;
@@ -41,75 +40,35 @@ fronthemDevice_Define($$)
   my $name = $a[0];
   my $identity = $a[2];
 
-  readingsBeginUpdate($hash);
-  readingsBulkUpdate($hash, 'state', 'disconnected');
-  readingsBulkUpdate($hash, 'identity', $identity);
-  readingsBulkUpdate($hash, 'gateway', '');
-  readingsEndUpdate($hash, 0);
-
   fronthemDevice_ReadCfg($hash);
-  fronthemDevice_Start($hash) if ($init_done);  
+  fronthemDevice_Register($hash) if ($init_done);
+
+  readingsBeginUpdate($hash);
+  readingsBulkUpdate($hash, "identity", $identity);
+  readingsEndUpdate($hash, 0);
+  {
+    my $converter = 'fronthem';
+    no strict 'refs';
+    @{$hash->{helper}->{converter}} = grep { defined &{"$converter\::$_"} } keys %{"$converter\::"};
+  }
+  
   return undef;
 }
 
-sub
-fronthemDevice_Start(@)
-{
-  my ($hash) = @_;
-
-  fronthemDevice_LoadConverter($hash);
-  fronthemDevice_Register($hash);
-  #TODO hee ??
-  $hash->{helper}->{init} = 'done';
-  return undef;
-}
-
-# register this client at fronthem instance
 sub
 fronthemDevice_Register(@)
 {
   my ($hash) = @_;
-  #TODO add attrib for manual assignment of fronthem
   foreach my $key (keys %defs)
   {
     if ($defs{$key}{TYPE} eq 'fronthem')
     {
       $hash->{helper}->{gateway} = $key;
       fronthem_RegisterClient($defs{$key}, $hash->{NAME});
-      readingsSingleUpdate($hash, 'gateway', $key, 0);
+      $hash->{helper}->{init} = 'done';
       last;
-    }    
+    }
   }
-  return undef;
-}
-
-# (re)load available converter
-sub
-fronthemDevice_LoadConverter(@)
-{
-  my ($hash) = @_;
-  {
-    my $converter = 'fronthem';
-    no strict 'refs';
-    @{$hash->{helper}->{converter}} = grep { defined &{"$converter\::$_"} } keys %{"$converter\::"};
-  }
-  return undef;
-}
-
-# (re)load available converter
-sub
-fronthemDevice_GetGateway(@)
-{
-  my ($hash) = @_;
-  return $defs{$hash->{helper}->{gateway}} if (defined($hash->{helper}->{gateway})); # && exists($defs{$hash->{helper}->{gateway}})
-  return undef;
-}
-
-sub
-fronthemDevice_SetGateway(@)
-{
-  my ($hash) = @_;
-  return $defs{$hash->{helper}->{gateway}} if (defined($hash->{helper}->{gateway})); # && exists($defs{$hash->{helper}->{gateway}})
   return undef;
 }
 
@@ -119,6 +78,10 @@ fronthemDevice_Set(@)
   my ($hash, $name, $cmd, @args) = @_;
   my $cnt = @args;
 
+  if ($cmd eq 'webif-data')
+  {
+    print Dumper decode_json(uri_unescape($args[0]));
+  }
   return undef;
 }
 
@@ -140,13 +103,13 @@ fronthemDevice_Get(@)
       log3 ($hash->{NAME}, 1, "Error decoding webif-data $e: ".join(' ',@args));
       return undef;
     };
-
+    print Dumper $transfer;
     if ($transfer->{cmd} eq 'gadList')
     {
       #TODO replace if getConfig is in place to prevent fails if parent is renamed
       my $config = $defs{$hash->{helper}->{gateway}}->{helper}->{config} if ($hash->{helper}->{gateway});
       my $result = {};
-      foreach my $key (keys %$config)
+      foreach my $key (keys $config)
       {
         my %copy =  %{$config->{$key}}; 
         $result->{$key} = \%copy;
@@ -185,6 +148,8 @@ fronthemDevice_Get(@)
     elsif ($transfer->{cmd} eq 'gadItemSave')
     {
       my $result;
+      #print "webif-data gadItemSave\n";
+      #print Dumper $transfer;
       fronthemDevice_ValidateGAD($hash, $transfer);
       $result->{result} = 'ok';
       return encode_json($result);  
@@ -204,8 +169,9 @@ fronthemDevice_Get(@)
       $result->{sets} = ();
       if ((defined($transfer->{device})) && (exists($defs{$transfer->{device}})) && (exists($defs{$transfer->{device}}->{READINGS})))
       {
-        foreach my $key (keys %{$defs{$transfer->{device}}->{READINGS}})
+        foreach my $key (keys $defs{$transfer->{device}}->{READINGS})
         {
+          print "device $key \n";
           push (@{$result->{readings}}, $key);
           @{$result->{readings}} = sort @{$result->{readings}};
         }
@@ -301,56 +267,30 @@ fronthemDevice_Notify($$)
   my ($hash, $ntfyDev) = @_;
   my $ntfyDevName = $ntfyDev->{NAME};
 
-  # responde to fhem system events
-  # INITIALIZED|REREADCFG|DEFINED|RENAMED|SHUTDOWN
-  if ($ntfyDevName eq "global")
-  {
-    foreach my $event (@{$ntfyDev->{CHANGED}})
-    {
-      my @e = split(' ', $event);
-      Log3 ($hash, 1, "in $e[0]"); #TODO remove
-      if ($e[0] eq 'INITIALIZED')
-      {
-        fronthemDevice_Start($hash);
-      }
-      elsif ($e[0] eq 'RENAMED')
-      {
-        # TODO see if it is my gateway
-        my $gateway = fronthemDevice_GetGateway($hash);
-        if ($gateway && ($gateway->{NAME} eq $e[1]))
-        {
-          Log3 ($hash, 4, "$hash->{NAME}:gatway $e[1] renamed to $e[2] - update settings");
-        }
-      }
-    }
-  }
-
+  #find parent if initialization done
+  fronthemDevice_Register($hash) if (!$hash->{helper}->{init} && ($ntfyDevName eq 'global') && grep(m/^INITIALIZED$/, @{$ntfyDev->{CHANGED}}));
   return undef if(AttrVal($hash->{NAME}, "disable", 0) == 1);
 
   my $result;
 
-  # TODO exit here if gateway is absend
-  # TODO exit here if disconnected
+  #TODO exit here if gateway is absend
 
   #of interest, device is in global (context fronthem parent device) list of known device->reading->gad ?
   if (defined($hash->{helper}->{gateway}) && exists($defs{$hash->{helper}->{gateway}}->{helper}->{listen}->{$ntfyDevName}))
   {
     my $max = int(@{$ntfyDev->{CHANGED}});
-    my $gateway = $hash->{helper}->{gateway}; # TODO getGateway 
+    my $gateway = $hash->{helper}->{gateway};
     my $listenDevice = $defs{$gateway}->{helper}->{listen}->{$ntfyDevName};
 
     for (my $i = 0; $i < $max; $i++) {
       my $s = $ntfyDev->{CHANGED}[$i];
-      $s = "state: $s" if (($ntfyDevName ne 'global') && ($s !~ m/.+?:\s.*/));
-      my @reading = split(/:\s/, $s, 2);
-      $reading[0] =~ s/:\s//;
-      # step back and see if there is a device-reading equal to $reading[0] 
-      # to prevent false interpreting of events like (state) T: 21 H: 50
-      @reading = ('state', $s) unless ( ($reading[0] eq 'state') || exists($ntfyDev->{READINGS}->{$reading[0]}) );
+      $s = "state: $s" if (($ntfyDevName ne 'global') && ($s !~ m/.*:.*/));
+      $s =~ s/://;
+      my @reading = split(' ', $s);
       if (defined($listenDevice->{$reading[0]}))
       {
         #global list of all gad using it
-        foreach my $gad (keys %{$listenDevice->{$reading[0]}})
+        foreach my $gad (keys $listenDevice->{$reading[0]})
         {
           #test local access rules
           #est it against local monitor list
@@ -363,6 +303,7 @@ fronthemDevice_Notify($$)
               if ($gadCfg->{type} eq 'item')
               {
                 my ($converter, $p) = split(/\s+/, $gadCfg->{converter}, 2);
+                #print "conv $converter\n";
                 my $param;
                 $param->{cmd} = 'send';
                 $param->{gad} = $gad;
@@ -416,17 +357,13 @@ fronthemDevice_DoConverter(@)
     #  return undef if pad_pin_special_cache_entry != extracted pin from key
     #}
   }
-  if (eval $convStr)
+  eval $convStr and do 
   {
-    #if there is a return value from converter, the converter may have chosen thats nothing to do, done by itself or a error is risen
+    #if there is a return value from converter, the converter may have chosen thats nothing to do, done by itslelf or a error is risen
     return undef if ($result eq 'done');
     return Log3 ($hash, 1, "$hash->{NAME}: $result");
-  }
-  if ($@)
-  {
-    return Log3 ($hash, 1, "$hash->{NAME}: error doing $convStr $@");
-  }
-
+  };
+  print "res $@ \n";
   if ($cmd =~/get|send/)
   {
     my $msg;
@@ -454,18 +391,8 @@ fronthemDevice_DoConverter(@)
 }
 
 sub
-fronthemDevice_Undef(@)
-{
-  my ($hash) = @_;
-  Log3 ($hash, 4, "$hash->{NAME}: undef called");
-  return undef;
-}
-
-sub
 fronthemDevice_Shutdown(@)
 {
-  my ($hash) = @_;
-  Log3 ($hash, 4, "$hash->{NAME}: shutdown called");
   return undef;
 }
 
@@ -519,20 +446,16 @@ fronthemDevice_ReadCfg(@)
     close $json_fh;
   };
 
-  my $data->{config} = {};
-  if (length($json_text))
+  my $data;
+  eval 
   {
-    eval
-    {
-      my $json = JSON->new->utf8;
-      $data = $json->decode($json_text);
-    };
-    if ($@)
-    {
-      Log3 ($hash, 1, "$hash->{NAME}: Error loading cfg file $@");
-      $data->{config} = {};
-    }
-  }
+    my $json = JSON->new->utf8;
+    $data = $json->decode($json_text);
+    1;
+  } or do {
+    Log3 ($hash, 1, "$hash->{NAME}: Error loading cfg file $@");
+    return undef;
+  };
   $hash->{helper}->{config} = $data->{config};
   return undef;
 }
@@ -612,6 +535,7 @@ fronthemDevice_fromDriver(@)
       #clear cache count
       $hash->{helper}->{cache}->{$gad}->{count} = 0;
       #call if a converter is set
+      print "monitor $gad \n";
       if (fronthemDevice_ConfigVal($hash, $gad, 'converter'))
       {
         my $param;
@@ -646,10 +570,13 @@ fronthemDevice_fromDriver(@)
       $param->{cache} = $hash->{helper}->{cache};
       my ($converter, $p) = split(/\s+/, fronthemDevice_ConfigVal($hash, $gad, 'converter'), 2);
       @{$param->{args}} = split(/\s*,\s*/, $p || '');
+      #print "in item loop: $converter \n";
+      #print Dumper $param;
       fronthemDevice_DoConverter($hash, $converter, $param);
     }
     return undef;
   }
+  #print Dumper $msg;
   return undef;
 }
 
