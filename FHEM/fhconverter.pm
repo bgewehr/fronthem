@@ -37,7 +37,8 @@ sub SetReading(@)
   }
   elsif ($param->{cmd} eq 'rcv')
   {
-	$param->{result} = main::fhem("setreading $device $reading '$gadval'");
+	$gadval =~ s/;/;;/;  
+	$param->{result} = main::fhem("setreading $device $reading $gadval");
 	$param->{results} = [];
     return 'done';
   }
