@@ -6,6 +6,119 @@ package fronthem;
 
 ###############################################################################
 #
+# generic regex converter (gadval =~ s/arg1/arg2/ig reading =~ setval s/arg3/arg4/ig) 
+# @param search1 replace1 search2 replace2
+# example: genRegExp on, 1, off, 0
+#
+###############################################################################
+sub genRegExp(@)
+{
+  my ($param) = @_;
+  my $cmd = $param->{cmd};
+  my $gad = $param->{gad};
+  my $gadval = $param->{gadval};
+
+  my $device = $param->{device};
+  my $reading = $param->{reading};
+  my $event = $param->{event};
+  
+  my @args = @{$param->{args}};
+  my $cache = $param->{cache};
+  
+  my $result = main::Debug('geRegExp Converter params: ' . $args[0] . ', ' . $args[1] . ', ' . $args[2] . ', ' . $args[3]);
+
+  if ($param->{cmd} eq 'get')
+  {
+    $param->{cmd} = 'send';
+  }
+  if ($param->{cmd} eq 'send')
+  {
+    $event = main::ReadingsVal($device, $reading, '');
+	if ($event =~ /$args[0]/) 
+	{
+		$event =~ s/$args[0]/$args[1]/ig;
+	}
+	elsif ($event =~ /$args[2]/) 
+	{
+		$event =~ s/$args[2]/$args[3]/ig;
+	}	
+    $param->{gad} = $gad;
+    $param->{gadval} = $event;
+    $param->{gads} = [];
+    return undef;
+  }
+  elsif ($param->{cmd} eq 'rcv')
+  {		
+	if ($gadval =~ /$args[1]/) 
+	{
+		$gadval =~ s/$args[1]/$args[0]/ig;
+	}
+	elsif ($gadval =~ /$args[3]/) 
+	{
+		$gadval =~ s/$args[3]/$args[2]/ig;
+	}	
+	$param->{result} = $gadval;
+	$param->{results} = [];
+    return undef;
+  }
+  elsif ($param->{cmd} eq '?')
+  {
+    return 'usage: Direct';
+  }
+  return undef;
+}
+
+
+###############################################################################
+#
+# Setreading a device reading using JSON2txt conversion (gadval == set reading == setval)
+#
+###############################################################################
+
+sub JSON2txt(@)
+{
+use JSON;
+
+  my ($param) = @_;
+  my $cmd = $param->{cmd};
+  my $gad = $param->{gad};
+  my $gadval = $param->{gadval};
+
+  my $device = $param->{device};
+  my $reading = $param->{reading};
+  my $event = $param->{event};
+  
+  my @args = @{$param->{args}};
+  my $cache = $param->{cache};
+
+  if ($param->{cmd} eq 'get')
+  {
+    $param->{cmd} = 'send';
+  }
+  if ($param->{cmd} eq 'send')
+  {
+    $param->{gad} = $gad;
+	$param->{gadval} = main::ReadingsVal($device, $reading, '');
+	$param->{gads} = [];
+    return undef;
+  }
+  elsif ($param->{cmd} eq 'rcv')
+  {
+	$gadval =~ s/;/;;/ig;  
+	$param->{result} = main::fhem("setreading $device $reading $gadval");
+	$param->{results} = [];
+    return 'done';
+  }
+  elsif ($param->{cmd} eq '?')
+  {
+    return 'usage: SetReading';
+  }
+  return undef;
+}
+
+
+###############################################################################
+#
 # Setreading a device reading (gadval == set reading == setval)
 #
 ###############################################################################
@@ -266,7 +379,7 @@ sub NumDirect(@)
 		my $min = $args[0];
 		my $max = $args[1];
 		my $adj = 0;
-		$gadval =~ s/[^0-9.\-\+]//g;
+		$gadval =~ s/[^0-9.\+]//g;
 
 		if (defined($min) && ($gadval < $min)) 
 		{
