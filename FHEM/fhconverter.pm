@@ -177,7 +177,7 @@ sub Trigger(@)
   my $gadval = $param->{gadval};
 
   my $device = $param->{device};
-  my $attribute = $param->{reading};
+  my $reading = $param->{reading};
   my $event = $param->{event};
   
   my @args = @{$param->{args}};
@@ -192,7 +192,7 @@ sub Trigger(@)
   if ($param->{cmd} eq 'send')
   {
     $param->{gad} = $gad;
-	$param->{gadval} = main::ReadingsVal($device, $attribute, '');;
+	$param->{gadval} = main::ReadingsVal($device, $reading, '');;
 	$param->{gads} = [];
     return undef;
   }
