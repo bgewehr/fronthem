@@ -59,15 +59,16 @@ function sveRefreshGADList(device, gadList) {
   var keys = Object.keys(gad);
   var len = keys.length;
   keys.sort();
+  insert.push('<input id="filterTable_input">');
   insert.push('<table id="gadlisttable" style="width:636px">');
-  insert.push('<th></th><th>gad</th><th>device</th><th>r</th><th>w</th>');
+  insert.push('<thead><tr><th></th><th>gad</th><th>device</th><th>r</th><th>w</th></tr></thead><tbody id="gadlisttablebody">');
   //$.each(gad, function(i, item) {
   //  insert.push('<tr id=' + i + ' style="cursor:pointer"><td><a>' + i + '</a></td><td>nnn</td></tr>');
   //});
   for (var i = 0; i < len; i++)
   {
     var key = keys[i];
-    insert.push('<tr id=' + key + ' style="cursor:pointer" class="' + ((i%2)?'even':'odd') + '"><td>' + 
+    insert.push('<tr id=' + key + ' style="cursor:pointer"><td>' + 
       ((gad[key]['monitor'] == 1)?'<img height="12" src="fhem/images/default/desktop.svg">':'') + '</td><td><a>' + 
       key + '</a></td><td>' +       
       ((typeof gad[key]['device'] == 'string')?gad[key]['device']:'') + '</td><td>' +
@@ -76,11 +77,44 @@ function sveRefreshGADList(device, gadList) {
     console.log(gad[key]['device']);
   }
   
-  insert.push('</table>');
+  insert.push('</tbody></table>');
   $('#gadlist').html(insert.join(''));
   $('#gadlisttable tr').click(function () {
     sveLoadGADitem(device, $(this).attr('id'));
   });
+  $("#filterTable_input").keyup(function () {
+	    //split the current value of searchInput
+	    var data = this.value.split(" ");
+	    //create a jquery object of the rows
+	    var jo = $("#gadlisttablebody").find("tr");
+	    if (this.value == "") {
+	        jo.show();
+	        return;
+	    }
+	    //hide all the rows
+	    jo.hide();
+	    //Recusively filter the jquery object to get results.
+	    jo.filter(function (i, v) {
+	        var $t = $(this);
+	        for (var d = 0; d < data.length; ++d) {
+	            if ($t.is(":contains('" + data[d] + "')")) {
+	                return true;
+	            }
+	        }
+	        return false;
+	    })
+	    //show the rows that match.
+	    .show();
+	}).focus(function () {
+	    this.value = "";
+	    $(this).css({
+	        "color": "black"
+	    });
+	    $(this).unbind('focus');
+	}).css({
+	    "color": "#C0C0C0"
+	});
+
 }
 
 function sveLoadGADitem(device, gadName) {
@@ -140,11 +174,13 @@ function sveGADEditorItem(device, gadName, gad) {
   $('#gadeditor').append('<tr><td>' + 'reading' + '</td><td align="right"><input id="gadEditReading" type="text" size="55" value="' + gad.reading +'"/></td></tr>');
   $('#gadeditor').append('<tr><td>' + 'converter' + '</td><td align="right"><input id="gadEditConverter" type="text" size="55" value="' + gad.converter +'"/></td></tr>');
   $('#gadeditor').append('<tr><td>' + 'cmd set' + '</td><td align="right"><input id="gadEditSet" type="text" size="55" value="' + gad.set +'"/></td></tr>');
-  $('#gadeditor').append('<tr><td>&nbsp;</td><td>&nbsp;</td></tr>');
-  $('#gadeditor').append('<tr><th colspan="2">permission for ' + device + '</th></tr>');
-  $('#gadeditor').append('<tr><td ><input type="checkbox" id="gadEditRead" ' + gad.read + '>read</td><td align="right"> PIN GAD: <input type="text" size="45" id="gadEditReadConverter" value="kommt später"></td>');
-  $('#gadeditor').append('<tr><td ><input type="checkbox" id="gadEditWrite" ' + gad.write + '>write</td><td align="right"> PIN GAD: <input type="text" size="45" id="gadEditWriteConverter" value="auch ;-)"></td>');
+  $('#gadeditor').append('<tr class="permission"><td>&nbsp;</td><td>&nbsp;</td></tr>');
+  $('#gadeditor').append('<tr class="permission"><th colspan="2">permission for ' + device + '</th></tr>');
+  $('#gadeditor').append('<tr class="permission"><td ><input type="checkbox" id="gadEditRead" ' + gad.read + '>read</td><td align="right"> PIN GAD: <input type="text" size="45" id="gadEditReadConverter" value="kommt später"></td>');
+  $('#gadeditor').append('<tr class="permission"><td ><input type="checkbox" id="gadEditWrite" ' + gad.write + '>write</td><td align="right"> PIN GAD: <input type="text" size="45" id="gadEditWriteConverter" value="auch ;-)"></td>');
   
+  if (gad.whitelist === 'false') $('.permission').hide();
+
   //preload autocomplete device
   $('#gadEditDevice').autocomplete({source: gad.deviceList, minLength: 0});
   $('#gadEditConverter').autocomplete({source: gad.converterList, minLength: 0});
@@ -186,7 +222,7 @@ function sveGADEditorItem(device, gadName, gad) {
   $('#gadeditor').append('<button id="gadEditDelete" type="button">delete</button>');
   $('#gadeditor').append('<button id="gadEditCancel" type="button">cancel</button>');
   $('#gadeditor').append('<button id="gadEditSave" type="button">save</button>');
-
+  
   $('#gadEditDelete').click(function() {
     sveGADEditorDelete(device, gadName, gad);
   });
